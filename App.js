@@ -16,7 +16,6 @@ import * as SQLite from 'expo-sqlite';
 import myColors from "./assets/colors.json";
 import myColorsDark from "./assets/colorsDark.json";
 
-
 const db = SQLite.openDatabaseSync('locations.db');
 
 export default function App() {
@@ -29,7 +28,7 @@ export default function App() {
     myOwnProperty: true,
     colors: myColors.colors,
   });
-// e
+
   // Inicializa o banco de dados e carrega os dados salvos
   useEffect(() => {
     db.execSync(
@@ -48,7 +47,7 @@ export default function App() {
     }
   }, [isSwitchOn]);
 
-  // pega  o estado do dark mode do AsyncStorage
+  // pega o estado do dark mode do AsyncStorage
   async function loadDarkMode() {
     try {
       const storedTheme = await AsyncStorage.getItem('@dark_mode');
@@ -71,8 +70,22 @@ export default function App() {
     }
   }
 
+  // Função auxiliar para perguntar ao usuário caso haja falha de captura de localização principal 
+  const askToUseLastKnownLocation = () => {
+    return new Promise((resolve) => {
+      Alert.alert(
+        'Falha na Localização',
+        'Não foi possível obter a localização atual exata. Deseja utilizar a última localização conhecida do dispositivo?',
+        [
+          { text: 'Não', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Sim', onPress: () => resolve(true) },
+        ]
+      );
+    });
+  };
+
   // Solicita permissão, captura a localização real e salva no SQLite
- async function getLocation() {
+  async function getLocation() {
     setIsLoading(true);
     try {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -91,29 +104,45 @@ export default function App() {
         return;
       }
 
-    
-let location = await Location.getLastKnownPositionAsync({});
+      let location;
 
+      try {
+        // Tenta pegar a posição atual como rota principal
+        location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Low, 
+        });
+      } catch (currentPosError) {
+        console.log("Falha no getCurrentPositionAsync:", currentPosError);
+        
+        // Se a atual falhar, pergunta se o usuário quer a última conhecida
+        const userWantsLastKnown = await askToUseLastKnownLocation();
+        
+        if (userWantsLastKnown) {
+          location = await Location.getLastKnownPositionAsync({});
+          if (!location) {
+             Alert.alert('Aviso', 'Nenhuma localização prévia encontrada no dispositivo.');
+             return;
+          }
+          console.log("Pegou a localização do getLastKnownPositionAsync");
+        } else {
+          // Usuário recusou usar a última conhecida, encerra a função
+          return; 
+        }
+      }
 
-if (!location) {
-  location = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.Low, 
-  });
-}
-else{
-  console.log("pegou a localizacao do getLastKwon position")
-}
+      // Se passou pelas verificações e tem a localização
+      if (location) {
+        const { latitude, longitude } = location.coords;
 
-const { latitude, longitude } = location.coords;
-
-      db.runSync(
-        'INSERT INTO locations (latitude, longitude) VALUES (?, ?)',
-        [latitude, longitude]
-      );
+        db.runSync(
+          'INSERT INTO locations (latitude, longitude) VALUES (?, ?)',
+          [latitude, longitude]
+        );
+        
+        loadLocations(); 
+      }
       
-      loadLocations(); 
     } catch (error) {
-      
       console.error("Erro capturado no catch:", error);
       Alert.alert('Erro inesperado', error.message || 'Falha ao capturar localização.');
     } finally {
